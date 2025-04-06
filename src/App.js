@@ -14,6 +14,7 @@ import TenantsPage from './components/tenants/TenantsPage';
 import SettingsPage from './components/settings/SettingsPage';
 import PaymentsPage from './components/payments/PaymentsPage';
 import MaintenancePage from './components/maintenance/MaintenancePage';
+import LeaseManagementPage from './components/leases/LeaseManagementPage';
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -59,6 +60,9 @@ export default function App() {
             <Route path="properties" element={<PropertiesPage />} />
             <Route path="add-property" element={<PropertyForm />} />
             <Route path="my-properties" element={<PropertiesPage />} />
+            
+            {/* Lease Routes */}
+            <Route path="leases" element={<LeaseManagementPage />} />
             
             {/* Applications Routes */}
             <Route path="applications" element={<ApplicationsPage />} />

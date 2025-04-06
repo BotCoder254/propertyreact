@@ -40,6 +40,7 @@ export default function Sidebar() {
     { name: 'My Profile', icon: <FiUser />, path: '/profile' },
     { name: 'Add Property', icon: <FiPlusCircle />, path: '/add-property' },
     { name: 'My Properties', icon: <FiList />, path: '/my-properties' },
+    { name: 'Lease Management', icon: <FiKey />, path: '/leases' },
     { name: 'Applications', icon: <FiFileText />, path: '/applications' },
     { name: 'Tenants', icon: <FiUsers />, path: '/tenants' },
     { name: 'Payments', icon: <FiDollarSign />, path: '/payments' },

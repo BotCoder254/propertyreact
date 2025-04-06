@@ -68,25 +68,25 @@ export default function PropertyList({ onEdit }) {
 
     if (filters.city) {
       filtered = filtered.filter(property => 
-        property.city.toLowerCase() === filters.city.toLowerCase()
+        property.city?.toLowerCase() === filters.city.toLowerCase()
       );
     }
 
     if (filters.minPrice) {
       filtered = filtered.filter(property => 
-        property.price >= Number(filters.minPrice)
+        (property.price || 0) >= Number(filters.minPrice)
       );
     }
 
     if (filters.maxPrice) {
       filtered = filtered.filter(property => 
-        property.price <= Number(filters.maxPrice)
+        (property.price || 0) <= Number(filters.maxPrice)
       );
     }
 
     if (filters.propertyType) {
       filtered = filtered.filter(property => 
-        property.type.toLowerCase() === filters.propertyType.toLowerCase()
+        property.type?.toLowerCase() === filters.propertyType.toLowerCase()
       );
     }
 
@@ -197,7 +197,7 @@ export default function PropertyList({ onEdit }) {
                   <div className="flex items-center text-gray-900 mb-4">
                     <FiDollarSign className="w-4 h-4 mr-1" />
                     <span className="text-lg font-semibold">
-                      ${property.price.toLocaleString()}/month
+                      ${property.price ? property.price.toLocaleString() : '0'}/month
                     </span>
                   </div>
 
