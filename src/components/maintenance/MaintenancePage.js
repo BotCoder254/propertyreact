@@ -28,16 +28,39 @@ const MaintenancePage = () => {
       const leasesQuery = query(
         collection(db, 'leases'),
         where('tenantId', '==', currentUser.uid),
-        where('status', '==', 'active')
+        where('status', 'in', ['signed', 'active']) // Include both signed and active leases
       );
       const leaseSnapshot = await getDocs(leasesQuery);
       
       if (leaseSnapshot.empty) {
-        setProperties([]);
+        // If no direct leases, check for property-based leases
+        const propertyQuery = query(
+          collection(db, 'properties'),
+          where('tenantId', '==', currentUser.uid)
+        );
+        const propertySnapshot = await getDocs(propertyQuery);
+        
+        if (propertySnapshot.empty) {
+          setProperties([]);
+          setError('No properties found. Please check your lease status.');
+          return;
+        }
+
+        // Map properties from direct property assignments
+        const propertyData = propertySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        setProperties(propertyData);
+        if (propertyData.length > 0) {
+          setSelectedProperty(propertyData[0]);
+          setError(''); // Clear any existing errors
+        }
         return;
       }
 
-      // Get all properties from active leases
+      // Get all properties from active/signed leases
       const propertyPromises = leaseSnapshot.docs.map(async (leaseDoc) => {
         const leaseData = leaseDoc.data();
         if (!leaseData.propertyId) return null;
@@ -66,8 +89,10 @@ const MaintenancePage = () => {
         if (!selectedProperty) {
           setSelectedProperty(propertyData[0]);
         }
+        setError(''); // Clear any existing errors
       } else {
         setProperties([]);
+        setError('No properties found. Please contact your landlord.');
       }
     } catch (error) {
       console.error('Error fetching properties:', error);
@@ -91,29 +116,66 @@ const MaintenancePage = () => {
     try {
       setLoading(true);
       setError('');
-      const q = query(
-        collection(db, 'maintenance'),
-        where(userRole === 'landlord' ? 'landlordId' : 'tenantId', '==', currentUser.uid)
+
+      let requestsQuery;
+      if (userRole === 'tenant') {
+        // For tenants, get requests based on their properties
+        if (properties.length === 0) {
+          await fetchProperties(); // Ensure properties are loaded
+        }
+        
+        if (properties.length > 0) {
+          const propertyIds = properties.map(p => p.id);
+          requestsQuery = query(
+            collection(db, 'maintenance'),
+            where('propertyId', 'in', propertyIds)
+          );
+        } else {
+          // Fallback to tenant ID if no properties found
+          requestsQuery = query(
+            collection(db, 'maintenance'),
+            where('tenantId', '==', currentUser.uid)
+          );
+        }
+      } else {
+        // For landlords, get all requests for their properties
+        requestsQuery = query(
+          collection(db, 'maintenance'),
+          where('landlordId', '==', currentUser.uid)
+        );
+      }
+
+      const snapshot = await getDocs(requestsQuery);
+      const requestsData = await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const data = { id: doc.id, ...doc.data() };
+          
+          // Fetch related property data if not already included
+          if (data.propertyId && !data.property) {
+            try {
+              const propertyRef = doc(db, 'properties', data.propertyId);
+              const propertyDoc = await getDoc(propertyRef);
+              if (propertyDoc.exists()) {
+                data.property = { id: propertyDoc.id, ...propertyDoc.data() };
+              }
+            } catch (propertyError) {
+              console.error('Error fetching property for request:', propertyError);
+            }
+          }
+          
+          return data;
+        })
       );
 
-      const querySnapshot = await getDocs(q);
-      const requestsData = await Promise.all(querySnapshot.docs.map(async doc => {
-        const request = { id: doc.id, ...doc.data() };
-        if (request.propertyId) {
-          const propertyDoc = await getDoc(doc(db, 'properties', request.propertyId));
-          if (propertyDoc.exists()) {
-            request.property = propertyDoc.data();
-          }
-        }
-        return request;
-      }));
+      // Sort requests by creation date (newest first)
+      const sortedRequests = requestsData.sort((a, b) => 
+        new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+      );
 
-      setRequests(requestsData.sort((a, b) => 
-        new Date(b.createdAt) - new Date(a.createdAt)
-      ));
+      setRequests(sortedRequests);
     } catch (error) {
       console.error('Error fetching maintenance requests:', error);
-      setError('Failed to fetch maintenance requests');
+      setError('Failed to fetch maintenance requests. Please try again.');
     } finally {
       setLoading(false);
     }
