@@ -10,6 +10,7 @@ import {
 import { db } from '../../firebase/config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
+import { Line, Pie, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Link } from 'react-router-dom';
 
 export default function LandlordDashboard() {
@@ -19,12 +20,31 @@ export default function LandlordDashboard() {
     totalRevenue: 0,
     pendingMaintenance: 0,
   });
+  const [revenueData, setRevenueData] = useState([
+    { month: 'Jan', amount: 0 },
+    { month: 'Feb', amount: 0 },
+    { month: 'Mar', amount: 0 },
+    { month: 'Apr', amount: 0 },
+    { month: 'May', amount: 0 },
+    { month: 'Jun', amount: 0 },
+  ]);
+  const [occupancyData, setOccupancyData] = useState([
+    { name: 'Occupied', value: 0 },
+    { name: 'Vacant', value: 0 },
+  ]);
+  const [maintenanceData, setMaintenanceData] = useState([
+    { name: 'Pending', value: 0 },
+    { name: 'In Progress', value: 0 },
+    { name: 'Completed', value: 0 },
+  ]);
   const { currentUser } = useAuth();
 
   useEffect(() => {
-    async function fetchStats() {
+    if (!currentUser) return;
+
+    const fetchData = async () => {
       try {
-        // Fetch properties
+        // Fetch properties and calculate occupancy
         const propertiesQuery = query(
           collection(db, 'properties'),
           where('landlordId', '==', currentUser.uid)
@@ -32,7 +52,6 @@ export default function LandlordDashboard() {
         const propertiesSnap = await getDocs(propertiesQuery);
         const totalProperties = propertiesSnap.size;
 
-        // Fetch occupied units
         const leasesQuery = query(
           collection(db, 'leases'),
           where('landlordId', '==', currentUser.uid),
@@ -41,38 +60,85 @@ export default function LandlordDashboard() {
         const leasesSnap = await getDocs(leasesQuery);
         const occupiedUnits = leasesSnap.size;
 
+        setOccupancyData([
+          { name: 'Occupied', value: occupiedUnits },
+          { name: 'Vacant', value: totalProperties - occupiedUnits }
+        ]);
+
         // Fetch maintenance requests
         const maintenanceQuery = query(
           collection(db, 'maintenance'),
-          where('landlordId', '==', currentUser.uid),
-          where('status', '==', 'pending')
+          where('landlordId', '==', currentUser.uid)
         );
         const maintenanceSnap = await getDocs(maintenanceQuery);
+        const maintenanceRequests = maintenanceSnap.docs.map(doc => doc.data());
+        
+        const maintenanceStats = {
+          Pending: 0,
+          'In Progress': 0,
+          Completed: 0
+        };
 
-        // Calculate total revenue
+        maintenanceRequests.forEach(request => {
+          if (request.status === 'pending') maintenanceStats.Pending++;
+          else if (request.status === 'in_progress') maintenanceStats['In Progress']++;
+          else if (request.status === 'completed') maintenanceStats.Completed++;
+        });
+
+        setMaintenanceData([
+          { name: 'Pending', value: maintenanceStats.Pending },
+          { name: 'In Progress', value: maintenanceStats['In Progress'] },
+          { name: 'Completed', value: maintenanceStats.Completed }
+        ]);
+
+        // Fetch payments for revenue data
         const paymentsQuery = query(
           collection(db, 'payments'),
           where('landlordId', '==', currentUser.uid),
           where('status', '==', 'completed')
         );
         const paymentsSnap = await getDocs(paymentsQuery);
-        const totalRevenue = paymentsSnap.docs.reduce(
-          (sum, doc) => sum + doc.data().amount,
-          0
-        );
+        const payments = paymentsSnap.docs.map(doc => ({
+          ...doc.data(),
+          date: new Date(doc.data().date)
+        }));
 
+        // Calculate last 6 months revenue
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const last6Months = Array.from({ length: 6 }, (_, i) => {
+          const date = new Date();
+          date.setMonth(date.getMonth() - i);
+          return {
+            month: monthNames[date.getMonth()],
+            amount: 0,
+            timestamp: date.getTime()
+          };
+        }).reverse();
+
+        payments.forEach(payment => {
+          const monthIndex = last6Months.findIndex(
+            month => payment.date.getMonth() === new Date(month.timestamp).getMonth()
+          );
+          if (monthIndex !== -1) {
+            last6Months[monthIndex].amount += payment.amount;
+          }
+        });
+
+        setRevenueData(last6Months);
+
+        // Update stats
         setStats({
           totalProperties,
           occupiedUnits,
-          totalRevenue,
-          pendingMaintenance: maintenanceSnap.size,
+          totalRevenue: payments.reduce((sum, payment) => sum + payment.amount, 0),
+          pendingMaintenance: maintenanceStats.Pending,
         });
       } catch (error) {
-        console.error('Error fetching stats:', error);
+        console.error('Error fetching dashboard data:', error);
       }
-    }
+    };
 
-    fetchStats();
+    fetchData();
   }, [currentUser]);
 
   const statCards = [
