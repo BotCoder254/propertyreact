@@ -55,23 +55,33 @@ export default function LeaseManagementPage() {
       );
       const snapshot = await getDocs(applicationsQuery);
       const applications = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const applicationData = { id: doc.id, ...doc.data() };
+        snapshot.docs.map(async (applicationDoc) => {
+          const applicationData = { id: applicationDoc.id, ...applicationDoc.data() };
           if (applicationData.propertyId) {
-            const propertyDoc = await getDoc(doc(db, 'properties', applicationData.propertyId));
-            if (propertyDoc.exists()) {
-              applicationData.property = { id: propertyDoc.id, ...propertyDoc.data() };
+            try {
+              const propertyRef = doc(db, 'properties', applicationData.propertyId);
+              const propertySnapshot = await getDoc(propertyRef);
+              if (propertySnapshot.exists()) {
+                applicationData.property = { id: propertySnapshot.id, ...propertySnapshot.data() };
+              }
+            } catch (propertyError) {
+              console.error('Error fetching property for application:', propertyError);
             }
           }
           return applicationData;
         })
       );
-      if (applications.length > 0) {
-        setSelectedApplication(applications[0]);
+      
+      // Only set the selected application if we have valid applications
+      if (applications && applications.length > 0) {
+        const validApplication = applications.find(app => app.property);
+        if (validApplication) {
+          setSelectedApplication(validApplication);
+        }
       }
     } catch (error) {
       console.error('Error fetching applications:', error);
-      setError('Failed to fetch applications');
+      setError('Unable to fetch applications. Please try again later.');
     }
   }
 
@@ -104,7 +114,7 @@ export default function LeaseManagementPage() {
           );
         }
       } else {
-        // For landlords, fetch their leases as before
+        // For landlords, fetch their leases
         leasesQuery = query(
           collection(db, 'leases'),
           where('landlordId', '==', currentUser.uid)
@@ -113,13 +123,14 @@ export default function LeaseManagementPage() {
 
       const leasesSnapshot = await getDocs(leasesQuery);
       const leasesData = await Promise.all(
-        leasesSnapshot.docs.map(async (doc) => {
-          const leaseData = { id: doc.id, ...doc.data() };
+        leasesSnapshot.docs.map(async (leaseDoc) => {
+          const leaseData = { id: leaseDoc.id, ...leaseDoc.data() };
 
           try {
             // Fetch related property data
             if (leaseData.propertyId) {
-              const propertyDoc = await getDoc(doc(db, 'properties', leaseData.propertyId));
+              const propertyRef = doc(db, 'properties', leaseData.propertyId);
+              const propertyDoc = await getDoc(propertyRef);
               if (propertyDoc.exists()) {
                 leaseData.property = { id: propertyDoc.id, ...propertyDoc.data() };
               }
@@ -127,7 +138,8 @@ export default function LeaseManagementPage() {
 
             // Fetch related application data
             if (leaseData.applicationId) {
-              const applicationDoc = await getDoc(doc(db, 'applications', leaseData.applicationId));
+              const applicationRef = doc(db, 'applications', leaseData.applicationId);
+              const applicationDoc = await getDoc(applicationRef);
               if (applicationDoc.exists()) {
                 leaseData.application = { id: applicationDoc.id, ...applicationDoc.data() };
               }
@@ -135,7 +147,8 @@ export default function LeaseManagementPage() {
 
             // Fetch tenant data
             if (leaseData.tenantId) {
-              const tenantDoc = await getDoc(doc(db, 'users', leaseData.tenantId));
+              const tenantRef = doc(db, 'users', leaseData.tenantId);
+              const tenantDoc = await getDoc(tenantRef);
               if (tenantDoc.exists()) {
                 leaseData.tenant = { id: tenantDoc.id, ...tenantDoc.data() };
               }
@@ -160,10 +173,10 @@ export default function LeaseManagementPage() {
       );
 
       setLeases(sortedLeases);
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching leases:', error);
       setError('Failed to fetch leases. Please try again.');
+    } finally {
       setLoading(false);
     }
   }

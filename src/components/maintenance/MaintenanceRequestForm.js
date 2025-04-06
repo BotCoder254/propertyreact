@@ -20,8 +20,8 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
   });
 
   useEffect(() => {
-    if (!property) {
-      setError('Please select a property before submitting a maintenance request.');
+    if (!property || !property.id) {
+      setError('Please select a property from the dropdown above.');
     } else {
       setError('');
     }
@@ -64,7 +64,7 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
     e.preventDefault();
     
     if (!property || !property.id) {
-      setError('Please select a valid property before submitting the request.');
+      setError('Please select a property from the dropdown above.');
       return;
     }
 
@@ -161,7 +161,7 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Priority
@@ -250,7 +250,7 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={onCancel}
-            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
           >
             Cancel
           </motion.button>
@@ -259,7 +259,9 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             disabled={loading}
-            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+            className={`px-4 py-2 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary ${
+              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-dark'
+            }`}
           >
             {loading ? 'Submitting...' : 'Submit Request'}
           </motion.button>
@@ -270,3 +272,4 @@ const MaintenanceRequestForm = ({ property, onSubmit, onCancel }) => {
 };
 
 export default MaintenanceRequestForm;
+

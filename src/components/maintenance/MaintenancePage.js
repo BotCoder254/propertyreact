@@ -24,29 +24,67 @@ const MaintenancePage = () => {
 
   async function fetchProperties() {
     try {
-      const q = query(
-        collection(db, 'properties'),
-        where('tenantId', '==', currentUser.uid)
+      // First get the tenant's approved leases
+      const leasesQuery = query(
+        collection(db, 'leases'),
+        where('tenantId', '==', currentUser.uid),
+        where('status', '==', 'active')
       );
-      const snapshot = await getDocs(q);
-      const propertyData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setProperties(propertyData);
+      const leaseSnapshot = await getDocs(leasesQuery);
       
-      if (propertyData.length > 0 && !selectedProperty) {
-        setSelectedProperty(propertyData[0]);
+      if (leaseSnapshot.empty) {
+        setProperties([]);
+        return;
+      }
+
+      // Get all properties from active leases
+      const propertyPromises = leaseSnapshot.docs.map(async (leaseDoc) => {
+        const leaseData = leaseDoc.data();
+        if (!leaseData.propertyId) return null;
+
+        try {
+          const propertyRef = doc(db, 'properties', leaseData.propertyId);
+          const propertyDoc = await getDoc(propertyRef);
+          
+          if (propertyDoc.exists()) {
+            return {
+              id: propertyDoc.id,
+              ...propertyDoc.data(),
+              leaseId: leaseDoc.id // Store the lease ID for reference
+            };
+          }
+        } catch (error) {
+          console.error('Error fetching property:', error);
+        }
+        return null;
+      });
+
+      const propertyData = (await Promise.all(propertyPromises)).filter(Boolean);
+      
+      if (propertyData.length > 0) {
+        setProperties(propertyData);
+        if (!selectedProperty) {
+          setSelectedProperty(propertyData[0]);
+        }
+      } else {
+        setProperties([]);
       }
     } catch (error) {
       console.error('Error fetching properties:', error);
-      setError('Failed to fetch properties');
+      setError('Failed to fetch properties. Please try again.');
     }
   }
 
   const handlePropertySelect = (propertyId) => {
+    if (!propertyId) {
+      setSelectedProperty(null);
+      return;
+    }
     const property = properties.find(p => p.id === propertyId);
-    setSelectedProperty(property);
+    if (property) {
+      setSelectedProperty(property);
+      setError(''); // Clear any existing errors
+    }
   };
 
   async function fetchRequests() {
@@ -150,7 +188,7 @@ const MaintenancePage = () => {
         <h1 className="text-2xl font-bold text-gray-900">
           Maintenance Requests
         </h1>
-        {userRole === 'tenant' && !showForm && properties.length > 0 && (
+        {userRole === 'tenant' && !showForm && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -179,36 +217,57 @@ const MaintenancePage = () => {
       {showForm ? (
         <>
           {properties.length > 0 ? (
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Property
-              </label>
-              <select
-                value={selectedProperty?.id || ''}
-                onChange={(e) => handlePropertySelect(e.target.value)}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary"
-              >
-                {properties.map(property => (
-                  <option key={property.id} value={property.id}>
-                    {property.name || property.address}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Property
+                </label>
+                <select
+                  value={selectedProperty?.id || ''}
+                  onChange={(e) => handlePropertySelect(e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary"
+                >
+                  <option value="">Select a property</option>
+                  {properties.map(property => (
+                    <option key={property.id} value={property.id}>
+                      {property.name || property.address}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedProperty && (
+                <MaintenanceRequestForm
+                  property={selectedProperty}
+                  onSubmit={handleRequestSubmit}
+                  onCancel={() => setShowForm(false)}
+                />
+              )}
+            </>
           ) : (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4"
+              className="bg-white rounded-lg shadow-sm p-6"
             >
-              No properties found. Please contact your landlord.
+              <div className="flex flex-col items-center space-y-4">
+                <div className="p-3 rounded-lg bg-yellow-100">
+                  <FiHome className="w-12 h-12 text-yellow-600" />
+                </div>
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-gray-900 mb-1">No Properties Available</h3>
+                  <p className="text-gray-500">Please check your lease status or contact your landlord for assistance.</p>
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowForm(false)}
+                  className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                >
+                  Go Back
+                </motion.button>
+              </div>
             </motion.div>
           )}
-          <MaintenanceRequestForm
-            property={selectedProperty}
-            onSubmit={handleRequestSubmit}
-            onCancel={() => setShowForm(false)}
-          />
         </>
       ) : (
         <>
@@ -218,7 +277,14 @@ const MaintenancePage = () => {
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-lg shadow-sm p-6 text-center"
             >
-              <p className="text-gray-500">No maintenance requests found</p>
+              <div className="flex flex-col items-center space-y-4">
+                <FiTool className="w-12 h-12 text-gray-400" />
+                <p className="text-gray-500">
+                  {userRole === 'tenant' 
+                    ? 'No maintenance requests found.'
+                    : 'No maintenance requests found.'}
+                </p>
+              </div>
             </motion.div>
           ) : (
             <div className="space-y-6">
