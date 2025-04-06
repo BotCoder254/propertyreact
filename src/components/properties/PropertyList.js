@@ -5,12 +5,16 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
 import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import PropertySearch from './PropertySearch';
+import ApplicationModal from '../applications/ApplicationModal';
 
 export default function PropertyList({ onEdit }) {
   const [properties, setProperties] = useState([]);
   const [filteredProperties, setFilteredProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedProperty, setSelectedProperty] = useState(null);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [propertyApplications, setPropertyApplications] = useState({});
   const { currentUser, userRole } = useAuth();
 
   useEffect(() => {
@@ -37,8 +41,22 @@ export default function PropertyList({ onEdit }) {
         ...doc.data()
       }));
 
+      // Fetch applications for each property
+      const applications = {};
+      if (userRole === 'tenant') {
+        const applicationsQuery = query(
+          collection(db, 'applications'),
+          where('tenantId', '==', currentUser.uid)
+        );
+        const applicationsSnapshot = await getDocs(applicationsQuery);
+        applicationsSnapshot.docs.forEach(doc => {
+          const application = doc.data();
+          applications[application.propertyId] = application.status;
+        });
+      }
+      setPropertyApplications(applications);
+
       const sortedProperties = propertiesData.sort((a, b) => a.price - b.price);
-      
       setProperties(sortedProperties);
       setFilteredProperties(sortedProperties);
     } catch (error) {
@@ -107,6 +125,24 @@ export default function PropertyList({ onEdit }) {
     }
   }
 
+  const handleApply = (property) => {
+    setSelectedProperty(property);
+    setShowApplicationModal(true);
+  };
+
+  const getApplicationStatus = (propertyId) => {
+    const status = propertyApplications[propertyId];
+    if (!status) return null;
+
+    const statusConfig = {
+      pending: { text: 'Application Pending', className: 'bg-yellow-100 text-yellow-800' },
+      approved: { text: 'Application Approved', className: 'bg-green-100 text-green-800' },
+      rejected: { text: 'Application Rejected', className: 'bg-red-100 text-red-800' }
+    };
+
+    return statusConfig[status] || null;
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -145,91 +181,109 @@ export default function PropertyList({ onEdit }) {
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProperties.map((property) => (
-              <motion.div
-                key={property.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                whileHover={{ y: -5 }}
-                className="bg-white rounded-lg shadow-sm overflow-hidden"
-              >
-                {/* Property Image */}
-                <div className="relative h-48">
-                  <img
-                    src={property.images?.[0] || 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3'}
-                    alt={property.name}
-                    className="w-full h-full object-cover"
-                  />
-                  {userRole === 'landlord' && (
-                    <div className="absolute top-2 right-2 space-x-2">
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => onEdit(property)}
-                        className="p-2 bg-white rounded-full shadow-md text-primary hover:text-primary-dark"
-                      >
-                        <FiEdit2 className="w-4 h-4" />
-                      </motion.button>
-                      <motion.button
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => handleDelete(property.id)}
-                        className="p-2 bg-white rounded-full shadow-md text-red-500 hover:text-red-600"
-                      >
-                        <FiTrash2 className="w-4 h-4" />
-                      </motion.button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Property Details */}
-                <div className="p-4">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    {property.name}
-                  </h3>
-                  
-                  <div className="flex items-center text-gray-600 mb-2">
-                    <FiMapPin className="w-4 h-4 mr-1" />
-                    <span className="text-sm">{property.address}</span>
+            {filteredProperties.map((property) => {
+              const applicationStatus = getApplicationStatus(property.id);
+              return (
+                <motion.div
+                  key={property.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  whileHover={{ y: -5 }}
+                  className="bg-white rounded-lg shadow-sm overflow-hidden"
+                >
+                  {/* Property Image */}
+                  <div className="relative h-48">
+                    <img
+                      src={property.images?.[0] || 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3'}
+                      alt={property.name}
+                      className="w-full h-full object-cover"
+                    />
+                    {userRole === 'landlord' && (
+                      <div className="absolute top-2 right-2 space-x-2">
+                        <motion.button
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => onEdit(property)}
+                          className="p-2 bg-white rounded-full shadow-md text-primary hover:text-primary-dark"
+                        >
+                          <FiEdit2 className="w-4 h-4" />
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => handleDelete(property.id)}
+                          className="p-2 bg-white rounded-full shadow-md text-red-500 hover:text-red-600"
+                        >
+                          <FiTrash2 className="w-4 h-4" />
+                        </motion.button>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex items-center text-gray-900 mb-4">
-                    <FiDollarSign className="w-4 h-4 mr-1" />
-                    <span className="text-lg font-semibold">
-                      ${property.price ? property.price.toLocaleString() : '0'}/month
-                    </span>
-                  </div>
+                  {/* Property Details */}
+                  <div className="p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      {property.name}
+                    </h3>
+                    
+                    <div className="flex items-center text-gray-600 mb-2">
+                      <FiMapPin className="w-4 h-4 mr-1" />
+                      <span className="text-sm">{property.address}</span>
+                    </div>
 
-                  <div className="flex items-center justify-between text-gray-600">
-                    <div className="flex items-center">
-                      <FiHome className="w-4 h-4 mr-1" />
-                      <span className="text-sm">{property.bedrooms} Beds</span>
+                    <div className="flex items-center text-gray-900 mb-4">
+                      <FiDollarSign className="w-4 h-4 mr-1" />
+                      <span className="text-lg font-semibold">
+                        ${property.price ? property.price.toLocaleString() : '0'}/month
+                      </span>
                     </div>
-                    <div className="flex items-center">
-                      <FiDroplet className="w-4 h-4 mr-1" />
-                      <span className="text-sm">{property.bathrooms} Baths</span>
-                    </div>
-                    <div className="text-sm">
-                      {property.area} sq ft
-                    </div>
-                  </div>
 
-                  {userRole === 'tenant' && (
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="w-full mt-4 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                    >
-                      Contact Landlord
-                    </motion.button>
-                  )}
-                </div>
-              </motion.div>
-            ))}
+                    <div className="flex items-center justify-between text-gray-600">
+                      <div className="flex items-center">
+                        <FiHome className="w-4 h-4 mr-1" />
+                        <span className="text-sm">{property.bedrooms} Beds</span>
+                      </div>
+                      <div className="flex items-center">
+                        <FiDroplet className="w-4 h-4 mr-1" />
+                        <span className="text-sm">{property.bathrooms} Baths</span>
+                      </div>
+                      <div className="text-sm">
+                        {property.area} sq ft
+                      </div>
+                    </div>
+
+                    {userRole === 'tenant' && (
+                      <div className="mt-4">
+                        {applicationStatus ? (
+                          <div className={`w-full px-4 py-2 rounded-md text-center ${applicationStatus.className}`}>
+                            {applicationStatus.text}
+                          </div>
+                        ) : (
+                          <motion.button
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleApply(property)}
+                            className="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+                          >
+                            Apply Now
+                          </motion.button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
         )}
       </AnimatePresence>
+
+      <ApplicationModal
+        property={selectedProperty}
+        isOpen={showApplicationModal}
+        onClose={() => setShowApplicationModal(false)}
+      />
     </div>
   );
 } 
