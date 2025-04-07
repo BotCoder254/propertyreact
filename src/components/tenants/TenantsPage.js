@@ -206,13 +206,13 @@ export default function TenantsPage() {
                   <FiFileText className="w-4 h-4 mr-2" />
                   View Lease
                 </Link>
-                <Link
+                {/* <Link
                   to={`/messages?tenant=${tenant.id}`}
                   className="flex items-center justify-center px-3 py-2 bg-primary bg-opacity-10 text-primary rounded-md hover:bg-opacity-20 transition-colors"
                 >
                   <FiMessageSquare className="w-4 h-4 mr-2" />
                   Message
-                </Link>
+                </Link> */}
               </div>
             </motion.div>
           ))}
