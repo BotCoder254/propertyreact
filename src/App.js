@@ -15,6 +15,7 @@ import SettingsPage from './components/settings/SettingsPage';
 import PaymentsPage from './components/payments/PaymentsPage';
 import MaintenancePage from './components/maintenance/MaintenancePage';
 import LeaseManagementPage from './components/leases/LeaseManagementPage';
+import PropertyView from './components/properties/PropertyView';
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -58,6 +59,7 @@ export default function App() {
             
             {/* Property Routes */}
             <Route path="properties" element={<PropertiesPage />} />
+            <Route path="properties/:propertyId" element={<PropertyView />} />
             <Route path="add-property" element={<PropertyForm />} />
             <Route path="my-properties" element={<PropertiesPage />} />
             

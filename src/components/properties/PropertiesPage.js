@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { FiPlusCircle } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 import PropertyForm from './PropertyForm';
@@ -8,11 +8,15 @@ import PropertyList from './PropertyList';
 export default function PropertiesPage() {
   const [showForm, setShowForm] = useState(false);
   const [selectedProperty, setSelectedProperty] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const { userRole } = useAuth();
 
-  const handleFormSubmit = () => {
+  const handleFormSubmit = (propertyData) => {
+    // Property has been saved successfully in PropertyForm
     setShowForm(false);
     setSelectedProperty(null);
+    // Force PropertyList to refresh
+    setRefreshKey(prev => prev + 1);
   };
 
   const handleFormCancel = () => {
@@ -44,15 +48,21 @@ export default function PropertiesPage() {
         )}
       </div>
 
-      {showForm ? (
-        <PropertyForm
-          property={selectedProperty}
-          onSubmit={handleFormSubmit}
-          onCancel={handleFormCancel}
-        />
-      ) : (
-        <PropertyList onEdit={handleEdit} />
-      )}
+      <AnimatePresence mode="wait">
+        {showForm ? (
+          <PropertyForm
+            key="property-form"
+            property={selectedProperty}
+            onSubmit={handleFormSubmit}
+            onCancel={handleFormCancel}
+          />
+        ) : (
+          <PropertyList
+            key={`property-list-${refreshKey}`}
+            onEdit={handleEdit}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 } 

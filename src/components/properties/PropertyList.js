@@ -1,71 +1,78 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FiMapPin, FiDollarSign, FiHome, FiDroplet, FiEdit2, FiTrash2 } from 'react-icons/fi';
+import { motion } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
+import { FiHome, FiDollarSign, FiMapPin, FiUser, FiDroplet, FiEdit2, FiTrash2, FiCheck, FiX } from 'react-icons/fi';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
-import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, deleteDoc, doc, getDocs } from 'firebase/firestore';
 import PropertySearch from './PropertySearch';
-import ApplicationModal from '../applications/ApplicationModal';
 
 export default function PropertyList({ onEdit }) {
   const [properties, setProperties] = useState([]);
-  const [filteredProperties, setFilteredProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedProperty, setSelectedProperty] = useState(null);
-  const [showApplicationModal, setShowApplicationModal] = useState(false);
-  const [propertyApplications, setPropertyApplications] = useState({});
+  const [filteredProperties, setFilteredProperties] = useState([]);
   const { currentUser, userRole } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchProperties();
+    if (!currentUser) return;
+
+    const fetchPropertiesWithStatus = async (propertiesData) => {
+      const updatedProperties = await Promise.all(
+        propertiesData.map(async (property) => {
+          // Check for approved applications
+          const applicationsQuery = query(
+            collection(db, 'applications'),
+            where('propertyId', '==', property.id),
+            where('status', '==', 'approved')
+          );
+          const applicationsSnapshot = await getDocs(applicationsQuery);
+
+          // Check for active leases
+          const leasesQuery = query(
+            collection(db, 'leases'),
+            where('propertyId', '==', property.id),
+            where('status', 'in', ['active', 'signed'])
+          );
+          const leasesSnapshot = await getDocs(leasesQuery);
+
+          return {
+            ...property,
+            isAvailable: !applicationsSnapshot.size && !leasesSnapshot.size
+          };
+        })
+      );
+      return updatedProperties;
+    };
+
+    const propertiesQuery = query(
+      collection(db, 'properties'),
+      userRole === 'landlord' 
+        ? where('landlordId', '==', currentUser.uid)
+        : where('status', '==', 'available')
+    );
+
+    const unsubscribe = onSnapshot(propertiesQuery, async (snapshot) => {
+      try {
+        const propertiesData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        const propertiesWithStatus = await fetchPropertiesWithStatus(propertiesData);
+        setProperties(propertiesWithStatus);
+        setFilteredProperties(propertiesWithStatus);
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching properties:', err);
+        setError('Failed to load properties');
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, [currentUser, userRole]);
-
-  async function fetchProperties() {
-    try {
-      setLoading(true);
-      let q;
-      
-      if (userRole === 'landlord') {
-        q = query(
-          collection(db, 'properties'),
-          where('landlordId', '==', currentUser.uid)
-        );
-      } else {
-        q = query(collection(db, 'properties'));
-      }
-
-      const querySnapshot = await getDocs(q);
-      const propertiesData = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      // Fetch applications for each property
-      const applications = {};
-      if (userRole === 'tenant') {
-        const applicationsQuery = query(
-          collection(db, 'applications'),
-          where('tenantId', '==', currentUser.uid)
-        );
-        const applicationsSnapshot = await getDocs(applicationsQuery);
-        applicationsSnapshot.docs.forEach(doc => {
-          const application = doc.data();
-          applications[application.propertyId] = application.status;
-        });
-      }
-      setPropertyApplications(applications);
-
-      const sortedProperties = propertiesData.sort((a, b) => a.price - b.price);
-      setProperties(sortedProperties);
-      setFilteredProperties(sortedProperties);
-    } catch (error) {
-      setError('Failed to fetch properties');
-      console.error('Error fetching properties:', error);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const handleSearch = (searchTerm) => {
     if (!searchTerm) {
@@ -73,10 +80,11 @@ export default function PropertyList({ onEdit }) {
       return;
     }
 
-    const searchTermLower = searchTerm.toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
     const filtered = properties.filter(property => 
-      property.name.toLowerCase().includes(searchTermLower) ||
-      property.address.toLowerCase().includes(searchTermLower)
+      property.name.toLowerCase().includes(searchLower) ||
+      property.address.toLowerCase().includes(searchLower) ||
+      property.city.toLowerCase().includes(searchLower)
     );
     setFilteredProperties(filtered);
   };
@@ -86,61 +94,55 @@ export default function PropertyList({ onEdit }) {
 
     if (filters.city) {
       filtered = filtered.filter(property => 
-        property.city?.toLowerCase() === filters.city.toLowerCase()
+        property.city.toLowerCase() === filters.city.toLowerCase()
       );
     }
 
     if (filters.minPrice) {
       filtered = filtered.filter(property => 
-        (property.price || 0) >= Number(filters.minPrice)
+        property.price >= parseFloat(filters.minPrice)
       );
     }
 
     if (filters.maxPrice) {
       filtered = filtered.filter(property => 
-        (property.price || 0) <= Number(filters.maxPrice)
+        property.price <= parseFloat(filters.maxPrice)
       );
     }
 
     if (filters.propertyType) {
       filtered = filtered.filter(property => 
-        property.type?.toLowerCase() === filters.propertyType.toLowerCase()
+        property.propertyType === filters.propertyType
+      );
+    }
+
+    if (filters.availability && filters.availability !== 'all') {
+      filtered = filtered.filter(property => 
+        filters.availability === 'available' ? property.isAvailable : !property.isAvailable
       );
     }
 
     setFilteredProperties(filtered);
   };
 
-  async function handleDelete(propertyId) {
+  const handleDelete = async (propertyId) => {
     if (!window.confirm('Are you sure you want to delete this property?')) {
       return;
     }
 
     try {
       await deleteDoc(doc(db, 'properties', propertyId));
-      setProperties(prev => prev.filter(p => p.id !== propertyId));
-      setFilteredProperties(prev => prev.filter(p => p.id !== propertyId));
-    } catch (error) {
-      console.error('Error deleting property:', error);
+    } catch (err) {
+      console.error('Error deleting property:', err);
+      setError('Failed to delete property');
     }
-  }
-
-  const handleApply = (property) => {
-    setSelectedProperty(property);
-    setShowApplicationModal(true);
   };
 
-  const getApplicationStatus = (propertyId) => {
-    const status = propertyApplications[propertyId];
-    if (!status) return null;
-
-    const statusConfig = {
-      pending: { text: 'Application Pending', className: 'bg-yellow-100 text-yellow-800' },
-      approved: { text: 'Application Approved', className: 'bg-green-100 text-green-800' },
-      rejected: { text: 'Application Rejected', className: 'bg-red-100 text-red-800' }
-    };
-
-    return statusConfig[status] || null;
+  const handlePropertyClick = (propertyId, e) => {
+    if (e.target.closest('button')) {
+      return;
+    }
+    navigate(`/properties/${propertyId}`);
   };
 
   if (loading) {
@@ -151,139 +153,119 @@ export default function PropertyList({ onEdit }) {
     );
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-        {error}
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <PropertySearch onSearch={handleSearch} onFilter={handleFilter} />
-      
-      <AnimatePresence>
-        {filteredProperties.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="flex flex-col items-center justify-center h-64"
-          >
-            <img
-              src="/empty-state.svg"
-              alt="No properties found"
-              className="w-32 h-32 mb-4"
-            />
-            <h3 className="text-lg font-medium text-gray-900">No properties found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters</p>
-          </motion.div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredProperties.map((property) => {
-              const applicationStatus = getApplicationStatus(property.id);
-              return (
-                <motion.div
-                  key={property.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  whileHover={{ y: -5 }}
-                  className="bg-white rounded-lg shadow-sm overflow-hidden"
-                >
-                  {/* Property Image */}
-                  <div className="relative h-48">
-                    <img
-                      src={property.images?.[0] || 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?ixlib=rb-4.0.3'}
-                      alt={property.name}
-                      className="w-full h-full object-cover"
-                    />
-                    {userRole === 'landlord' && (
-                      <div className="absolute top-2 right-2 space-x-2">
-                        <motion.button
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => onEdit(property)}
-                          className="p-2 bg-white rounded-full shadow-md text-primary hover:text-primary-dark"
-                        >
-                          <FiEdit2 className="w-4 h-4" />
-                        </motion.button>
-                        <motion.button
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          onClick={() => handleDelete(property.id)}
-                          className="p-2 bg-white rounded-full shadow-md text-red-500 hover:text-red-600"
-                        >
-                          <FiTrash2 className="w-4 h-4" />
-                        </motion.button>
-                      </div>
-                    )}
+
+      {error && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-red-100 text-red-700 p-4 rounded-lg"
+        >
+          {error}
+        </motion.div>
+      )}
+
+      {filteredProperties.length === 0 ? (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-lg shadow-sm p-6 text-center"
+        >
+          <p className="text-gray-500">No properties found</p>
+        </motion.div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredProperties.map((property) => (
+            <motion.div
+              key={property.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -5 }}
+              className="bg-white rounded-lg shadow-sm overflow-hidden cursor-pointer"
+              onClick={(e) => handlePropertyClick(property.id, e)}
+            >
+              <div className="relative h-48">
+                {property.images && property.images.length > 0 ? (
+                  <img
+                    src={property.images[0]}
+                    alt={property.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                    <FiHome className="w-12 h-12 text-gray-400" />
                   </div>
+                )}
+                <div className="absolute top-4 right-4 flex flex-col gap-2">
+                  <span className="px-2 py-1 bg-primary text-white text-sm rounded-md">
+                    ${property.price.toLocaleString()}/mo
+                  </span>
+                  <span className={`px-2 py-1 text-sm rounded-md ${
+                    property.isAvailable 
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-red-100 text-red-800'
+                  }`}>
+                    {property.isAvailable ? 'Available' : 'Not Available'}
+                  </span>
+                </div>
+              </div>
 
-                  {/* Property Details */}
-                  <div className="p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                      {property.name}
-                    </h3>
-                    
-                    <div className="flex items-center text-gray-600 mb-2">
-                      <FiMapPin className="w-4 h-4 mr-1" />
-                      <span className="text-sm">{property.address}</span>
-                    </div>
+              <div className="p-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  {property.name}
+                </h3>
+                <div className="flex items-center text-gray-600 mb-4">
+                  <FiMapPin className="w-4 h-4 mr-1" />
+                  <span className="text-sm">{property.address}</span>
+                </div>
 
-                    <div className="flex items-center text-gray-900 mb-4">
-                      <FiDollarSign className="w-4 h-4 mr-1" />
-                      <span className="text-lg font-semibold">
-                        ${property.price ? property.price.toLocaleString() : '0'}/month
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-gray-600">
-                      <div className="flex items-center">
-                        <FiHome className="w-4 h-4 mr-1" />
-                        <span className="text-sm">{property.bedrooms} Beds</span>
-                      </div>
-                      <div className="flex items-center">
-                        <FiDroplet className="w-4 h-4 mr-1" />
-                        <span className="text-sm">{property.bathrooms} Baths</span>
-                      </div>
-                      <div className="text-sm">
-                        {property.area} sq ft
-                      </div>
-                    </div>
-
-                    {userRole === 'tenant' && (
-                      <div className="mt-4">
-                        {applicationStatus ? (
-                          <div className={`w-full px-4 py-2 rounded-md text-center ${applicationStatus.className}`}>
-                            {applicationStatus.text}
-                          </div>
-                        ) : (
-                          <motion.button
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => handleApply(property)}
-                            className="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                          >
-                            Apply Now
-                          </motion.button>
-                        )}
-                      </div>
-                    )}
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div className="flex items-center text-gray-600">
+                    <FiUser className="w-4 h-4 mr-1" />
+                    <span className="text-sm">{property.bedrooms} Beds</span>
                   </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-      </AnimatePresence>
+                  <div className="flex items-center text-gray-600">
+                    <FiDroplet className="w-4 h-4 mr-1" />
+                    <span className="text-sm">{property.bathrooms} Baths</span>
+                  </div>
+                  <div className="flex items-center text-gray-600">
+                    <span className="text-sm">{property.squareFeet} sqft</span>
+                  </div>
+                </div>
 
-      <ApplicationModal
-        property={selectedProperty}
-        isOpen={showApplicationModal}
-        onClose={() => setShowApplicationModal(false)}
-      />
+                {userRole === 'landlord' && (
+                  <div className="flex justify-end space-x-2 mt-4 pt-4 border-t border-gray-200">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(property);
+                      }}
+                      className="p-2 text-primary hover:bg-primary hover:bg-opacity-10 rounded-full"
+                    >
+                      <FiEdit2 className="w-5 h-5" />
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(property.id);
+                      }}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-full"
+                    >
+                      <FiTrash2 className="w-5 h-5" />
+                    </motion.button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
     </div>
   );
 } 
